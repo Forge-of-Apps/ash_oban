@@ -185,6 +185,7 @@ defmodule AshOban do
     name: :trigger,
     target: Trigger,
     args: [:name],
+    no_depend_modules: [:actor_persister, :worker_module_name, :scheduler_module_name],
     identifier: :name,
     imports: [Ash.Expr],
     transform: {Trigger, :transform, []},
@@ -218,9 +219,9 @@ defmodule AshOban do
         """
       ],
       actor_persister: [
-        type: {:or, [{:literal, :none}, {:behaviour, AshOban.PersistActor}]},
+        type: {:or, [{:literal, :none}, {:behaviour, AshOban.ActorPersister}]},
         doc:
-          "An `AshOban.PersistActor` to use to store the actor. Defaults to to the configured `config :ash_oban, :actor_persister`. Set to `:none` to override the configured default."
+          "An `AshOban.ActorPersister` to use to store the actor. Defaults to to the configured `config :ash_oban, :actor_persister`. Set to `:none` to override the configured default."
       ],
       default_actor: [
         type: :any,
@@ -422,6 +423,10 @@ defmodule AshOban do
 
         We recommend `shared_context [:job]` for most use cases.
 
+        This only affects the trigger's action. The reads AshOban does to evaluate the trigger's
+        `where`, in the scheduler and in the worker, always share `ash_oban?`, so
+        `AshOban.Checks.AshObanInteraction` applies to related data the filter reads.
+
         If not specified, inherits the global `shared_context` setting from the `oban` section,
         then falls back to `Application.get_env(:ash_oban, :shared_context)`.
         """
@@ -517,7 +522,8 @@ defmodule AshOban do
             priority: non_neg_integer(),
             shared_context?: boolean(),
             shared_context: :all | [:ash_oban? | :job],
-            tags: [String.t()]
+            tags: [String.t()],
+            worker_opts: keyword()
           }
 
     defstruct [
@@ -539,6 +545,7 @@ defmodule AshOban do
       :shared_context?,
       :shared_context,
       :tags,
+      :worker_opts,
       :__identifier__,
       :__spark_metadata__
     ]
@@ -548,6 +555,7 @@ defmodule AshOban do
     name: :schedule,
     target: Schedule,
     args: [:name, :cron],
+    no_depend_modules: [:actor_persister, :worker_module_name],
     identifier: :name,
     schema: [
       name: [
@@ -579,9 +587,9 @@ defmodule AshOban do
         doc: "The generic or create action to call when the schedule is triggered."
       ],
       actor_persister: [
-        type: {:or, [{:literal, :none}, {:behaviour, AshOban.PersistActor}]},
+        type: {:or, [{:literal, :none}, {:behaviour, AshOban.ActorPersister}]},
         doc:
-          "An `AshOban.PersistActor` to use to store the actor. Defaults to to the configured `config :ash_oban, :actor_persister`. Set to `:none` to override the configured default."
+          "An `AshOban.ActorPersister` to use to store the actor. Defaults to to the configured `config :ash_oban, :actor_persister`. Set to `:none` to override the configured default."
       ],
       default_actor: [
         type: :any,
@@ -624,7 +632,21 @@ defmodule AshOban do
       tags: [
         type: {:list, :string},
         default: [],
-        doc: "A list of tags to add to the Oban job."
+        doc: """
+        A list of tags to add to the Oban job. Tags are merged with any tags set in `worker_opts`.
+        """
+      ],
+      worker_opts: [
+        type: :keyword_list,
+        default: [],
+        doc: """
+        Options to set on the worker.
+
+        ATTENTION: this may overwrite options set by ash_oban, make sure you know what you are doing.
+
+        See [Oban.Worker](https://hexdocs.pm/oban/Oban.Worker.html#module-defining-workers) for options
+        and [Oban.Pro.Worker](https://oban.pro/docs/pro/Oban.Pro.Worker.html) for oban pro
+        """
       ],
       debug?: [
         type: :boolean,
@@ -683,6 +705,7 @@ defmodule AshOban do
 
   @oban %Spark.Dsl.Section{
     name: :oban,
+    no_depend_modules: [:domain],
     examples: [
       """
       oban do
@@ -735,6 +758,10 @@ defmodule AshOban do
         Use `:all` to share all keys (equivalent to the old `shared_context? true`).
 
         We recommend `shared_context [:job]` for most use cases.
+
+        This only affects triggers' actions. The reads AshOban does to evaluate a trigger's `where`
+        always share `ash_oban?`, so `AshOban.Checks.AshObanInteraction` applies to related data
+        the filter reads.
 
         Can be overridden per trigger or scheduled action.
 
@@ -793,7 +820,8 @@ defmodule AshOban do
     transformers: [
       AshOban.Transformers.SetDefaults,
       AshOban.Transformers.DefineSchedulers,
-      AshOban.Transformers.DefineActionWorkers
+      AshOban.Transformers.DefineActionWorkers,
+      AshOban.Transformers.DefineSignalWorkers
     ]
 
   @doc """
@@ -830,6 +858,17 @@ defmodule AshOban do
     else
       Map.put(regular, :shared, shared)
     end
+  end
+
+  @doc """
+  Builds the context for the queries AshOban runs to evaluate a trigger: the
+  scheduler's query, and the worker's read of the record before acting on it.
+
+  The `ash_oban?` flag is always shared here.
+  """
+  @spec build_query_context(:all | [atom()] | nil | false, Oban.Job.t() | nil) :: map()
+  def build_query_context(shared_context, job \\ nil) do
+    build_context(Enum.uniq([:ash_oban? | normalize_shared_context(shared_context)]), job)
   end
 
   defp normalize_shared_context(:all), do: [:ash_oban?, :job]
@@ -1171,11 +1210,18 @@ defmodule AshOban do
       """
     end
 
-    resources_and_triggers =
+    resources =
       domains
       |> List.wrap()
       |> Enum.flat_map(&Ash.Domain.Info.resources/1)
       |> Enum.uniq()
+
+    if opts[:require?] do
+      require_signal_queues!(resources, base, dynamic_queues)
+    end
+
+    resources_and_triggers =
+      resources
       |> Enum.flat_map(fn resource ->
         resource
         |> AshOban.Info.oban_triggers_and_scheduled_actions()
@@ -1324,6 +1370,25 @@ defmodule AshOban do
 
     assert_queue!(queues, trigger.queue, resource, trigger.name)
     assert_scheduler_queue!(queues, trigger, resource)
+  end
+
+  defp require_signal_queues!(resources, base, dynamic_queues) do
+    listeners =
+      for resource <- resources,
+          %{delivery: {AshOban.Signals, opts}} = listener <-
+            Ash.Resource.Info.signal_listeners(resource),
+          do: {resource, listener, AshOban.Signals.options!(opts)[:queue]}
+
+    if listeners != [] do
+      queues = target_queues(base, dynamic_queues)
+
+      for {resource, listener, queue} <- listeners, !queues[queue] do
+        raise """
+        Must configure the queue `:#{queue}`, required for
+        the signal listener `:#{listener.name}` on #{inspect(resource)}
+        """
+      end
+    end
   end
 
   defp target_queues(base, {plugin, opts}) do

@@ -5,7 +5,7 @@
 defmodule AshOban.MixProject do
   use Mix.Project
 
-  @version "0.8.14"
+  @version "0.10.2"
 
   @description """
   The extension for integrating Ash resources with Oban.
@@ -77,6 +77,7 @@ defmodule AshOban.MixProject do
         {"README.md", title: "Home"},
         "documentation/tutorials/getting-started-with-ash-oban.md",
         "documentation/topics/triggers-and-scheduled-actions.md",
+        "documentation/topics/signals.md",
         "documentation/topics/testing.md",
         {"documentation/dsls/DSL-AshOban.md", search_data: Spark.Docs.search_data_for(AshOban)},
         "CHANGELOG.md"
@@ -100,6 +101,11 @@ defmodule AshOban.MixProject do
         ],
         Authorization: [
           AshOban.Checks.AshObanInteraction
+        ],
+        Signals: [
+          AshOban.Signals,
+          AshOban.Signals.Upgrader,
+          AshOban.Signals.Worker
         ],
         Introspection: [
           AshOban.Info,
@@ -131,11 +137,11 @@ defmodule AshOban.MixProject do
 
     oban_dep ++
       [
-        {:ash, ash_version("~> 3.0 and >=3.8.0")},
+        {:ash, ash_version("~> 3.0 and >= 3.36.1")},
         {:oban, "~> 2.20"},
         {:postgrex, "~> 0.18"},
         # dev/test dependencies
-        {:igniter, "~> 0.7.0", only: [:dev, :test]},
+        {:igniter, "~> 0.8.4", only: [:dev, :test]},
         {:simple_sat, "~> 0.1", only: [:dev, :test]},
         {:ex_doc, "~> 0.37-rc", only: [:dev, :test], runtime: false},
         {:ex_check, "~> 0.12", only: [:dev, :test]},

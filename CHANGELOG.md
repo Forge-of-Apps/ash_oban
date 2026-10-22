@@ -11,6 +11,50 @@ See [Conventional Commits](Https://conventionalcommits.org) for commit guideline
 
 <!-- changelog -->
 
+## [v0.10.2](https://github.com/ash-project/ash_oban/compare/v0.10.1...v0.10.2) (2026-10-18)
+
+
+
+
+### Bug Fixes:
+
+* ensure that related filters/aggregate queries honor `ash_oban?`context by Zach Daniel
+
+* update usage rules to reference proper actor persisters by Zach Daniel
+
+## [v0.10.1](https://github.com/ash-project/ash_oban/compare/v0.10.0...v0.10.1) (2026-10-15)
+
+
+
+
+### Improvements:
+
+* support `signal_path` by Zach Daniel
+
+## [v0.10.0](https://github.com/ash-project/ash_oban/compare/v0.9.0...v0.10.0) (2026-10-14)
+
+
+
+
+### Features:
+
+* add `AshOban.Signals`, a delivery that runs signal listeners in Oban jobs by Zach Daniel
+
+## [v0.9.0](https://github.com/ash-project/ash_oban/compare/v0.8.14...v0.9.0) (2026-09-30)
+
+
+
+
+### Features:
+
+* support Oban 2.24 plugin style by Kevin Schweikert
+
+## Unreleased
+
+### Improvements:
+
+* add `worker_opts` to scheduled actions, merged over the generated worker options the way triggers already do
+
 ## [v0.8.14](https://github.com/ash-project/ash_oban/compare/v0.8.13...v0.8.14) (2026-08-30)
 
 
